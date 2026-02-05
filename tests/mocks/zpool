@@ -16,7 +16,12 @@ case "$1" in
 
         while [[ $# -gt 0 ]]; do
             case "$1" in
-                -f|-o|-O)
+                -f)
+                    # -f is a flag with no argument
+                    shift
+                    ;;
+                -o|-O)
+                    # -o and -O take an argument
                     shift 2
                     ;;
                 mirror|raidz1|raidz2)
@@ -28,7 +33,7 @@ case "$1" in
                     shift
                     ;;
                 *)
-                    if [[ -z "$pool_name" ]]; then
+                    if [[ -z "$pool_name" && "$1" != "" ]]; then
                         pool_name="$1"
                     fi
                     shift
@@ -37,8 +42,13 @@ case "$1" in
         done
 
         # Record the pool creation
-        echo "pool=$pool_name type=$pool_type disks=$disks" > "$MOCK_ZPOOL_DIR/$pool_name"
-        echo "Pool '$pool_name' created"
+        if [[ -n "$pool_name" ]]; then
+            echo "pool=$pool_name type=$pool_type disks=$disks" > "$MOCK_ZPOOL_DIR/$pool_name"
+            echo "Pool '$pool_name' created"
+        else
+            echo "Error: no pool name specified" >&2
+            exit 1
+        fi
         ;;
     status)
         pool_name="${2:-rpool}"
