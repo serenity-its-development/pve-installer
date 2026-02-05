@@ -308,8 +308,11 @@ create_banner() {
   ╔═══════════════════════════════════════════════════════════════╗
   ║                    PROXMOX VE + CLAUDE CODE                   ║
   ╠═══════════════════════════════════════════════════════════════╣
+  ║                                                               ║
+  ║  Type 'tm' to start Claude   ◄── Just type this!             ║
+  ║                                                               ║
   ║  Web UI:  https://${ip}:8006                            ║
-  ║  Claude:  Type 'tm' to start/attach Claude session            ║
+  ║                                                               ║
   ╚═══════════════════════════════════════════════════════════════╝
 
 EOF

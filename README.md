@@ -43,14 +43,23 @@ This will:
 
 After Proxmox reboots, **Claude setup runs automatically!**
 
-Just SSH into your server:
-```bash
-ssh root@<your-server-ip>
+**At the console** (keyboard + monitor on server):
+```
+Login: root
+Password: <your password>
+
+Type: tm
 ```
 
-You'll see a message that Claude is ready. Type `tm` to attach.
+**Or via SSH:**
+```bash
+ssh root@<your-server-ip>
+tm
+```
 
-> **If auto-setup didn't run**, you can trigger it manually:
+That's it - Claude is ready!
+
+> **If auto-setup didn't run**, trigger it manually:
 > ```bash
 > curl -fsSL https://raw.githubusercontent.com/serenity-its-development/pve-installer/main/post-install/first-boot-setup.sh | bash
 > ```
