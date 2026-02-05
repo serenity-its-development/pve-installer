@@ -1,0 +1,33 @@
+#!/bin/bash
+#
+# Mock ip command for testing
+#
+
+# Default values
+MOCK_IP_ADDRESS="${MOCK_IP_ADDRESS:-192.168.1.100}"
+MOCK_NETMASK="${MOCK_NETMASK:-24}"
+MOCK_GATEWAY="${MOCK_GATEWAY:-192.168.1.1}"
+MOCK_INTERFACE="${MOCK_INTERFACE:-eth0}"
+
+case "$*" in
+    "route get 1")
+        echo "1.0.0.0 via $MOCK_GATEWAY dev $MOCK_INTERFACE src $MOCK_IP_ADDRESS uid 0"
+        ;;
+    "route")
+        echo "default via $MOCK_GATEWAY dev $MOCK_INTERFACE"
+        echo "$MOCK_IP_ADDRESS/$MOCK_NETMASK dev $MOCK_INTERFACE proto kernel scope link src $MOCK_IP_ADDRESS"
+        ;;
+    "-o -f inet addr show $MOCK_INTERFACE"|"-o -f inet addr show eth0")
+        echo "2: $MOCK_INTERFACE    inet $MOCK_IP_ADDRESS/$MOCK_NETMASK brd 192.168.1.255 scope global $MOCK_INTERFACE"
+        ;;
+    "addr")
+        echo "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN"
+        echo "    inet 127.0.0.1/8 scope host lo"
+        echo "2: $MOCK_INTERFACE: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state UP"
+        echo "    inet $MOCK_IP_ADDRESS/$MOCK_NETMASK brd 192.168.1.255 scope global $MOCK_INTERFACE"
+        ;;
+    *)
+        echo "Mock ip: unhandled arguments: $*" >&2
+        exit 1
+        ;;
+esac

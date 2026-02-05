@@ -13,10 +13,17 @@ This project creates a bootable USB that:
 ## Requirements
 
 ### Build System
-- Debian/Ubuntu Linux (for building the USB image)
+
+**Option A: Linux (Full Customization)**
+- Debian/Ubuntu Linux
 - `live-build` package
 - `debootstrap`
 - Root/sudo access
+
+**Option B: Windows 11 (Quick Build)**
+- Windows 11 or Windows 10
+- PowerShell (Run as Administrator)
+- Optional: WSL2 for full customization
 
 ### Target Server
 - x86_64 system with UEFI or Legacy BIOS
@@ -28,6 +35,7 @@ This project creates a bootable USB that:
 
 ### 1. Build the USB Image
 
+**On Linux:**
 ```bash
 cd build
 sudo ./build-usb.sh
@@ -37,6 +45,17 @@ This creates `pve-installer.iso` which can be written to USB:
 
 ```bash
 sudo dd if=pve-installer.iso of=/dev/sdX bs=4M status=progress
+```
+
+**On Windows 11 (PowerShell as Administrator):**
+```powershell
+cd build
+
+# Direct USB write (downloads Debian Live + adds scripts)
+.\build-usb.ps1
+
+# Or use WSL for full customization
+.\build-usb.ps1 -UseWSL
 ```
 
 ### 2. Boot and Install
@@ -52,26 +71,6 @@ After Proxmox is installed and running:
 - Access web UI at `https://<server-ip>:8006`
 - SSH into the server
 - Run `/root/setup-claude.sh` to install Claude Code for ongoing management
-
-## Project Structure
-
-```
-pve-installer/
-├── build/                  # USB image build scripts
-│   ├── build-usb.sh        # Main build script
-│   └── hooks/              # Live-build customization hooks
-├── installer/              # Installation scripts (copied to USB)
-│   ├── install-proxmox.sh  # Main Proxmox installation
-│   ├── configure-zfs.sh    # ZFS pool setup
-│   └── configure-network.sh # Network configuration
-├── post-install/           # Scripts for after PVE is running
-│   ├── setup-claude.sh     # Install Claude Code on PVE
-│   └── configure-static-ip.sh # Convert to static IP
-├── config/                 # Configuration templates
-│   ├── sources.list.pve    # Proxmox apt sources
-│   └── interfaces.template # Network interface template
-└── README.md
-```
 
 ## Configuration
 
@@ -105,6 +104,49 @@ $ claude
 > Create a new VM with 4 cores and 8GB RAM
 > Set up a backup schedule for all VMs
 ```
+
+## Project Structure
+
+```
+pve-installer/
+├── build/                  # USB image build scripts
+│   ├── build-usb.sh        # Linux build script
+│   ├── build-usb.ps1       # Windows build script
+│   └── hooks/              # Live-build customization hooks
+├── installer/              # Installation scripts (copied to USB)
+│   ├── install-proxmox.sh  # Main Proxmox installation
+│   ├── configure-zfs.sh    # ZFS pool setup
+│   └── configure-network.sh # Network configuration
+├── post-install/           # Scripts for after PVE is running
+│   ├── setup-claude.sh     # Install Claude Code on PVE
+│   └── configure-static-ip.sh # Convert to static IP
+├── config/                 # Configuration templates
+│   ├── sources.list.pve    # Proxmox apt sources
+│   └── interfaces.template # Network interface template
+├── tests/                  # Test suite
+│   ├── unit/               # Unit tests (Bats)
+│   ├── mocks/              # Mock commands for testing
+│   └── run_tests.sh        # Test runner
+└── README.md
+```
+
+## Testing
+
+Run the test suite:
+
+```bash
+# Run all tests
+cd tests
+./run_tests.sh
+
+# Run only unit tests
+./run_tests.sh unit
+
+# Run with verbose output
+./run_tests.sh -v
+```
+
+Tests are automatically run on push via GitHub Actions.
 
 ## License
 

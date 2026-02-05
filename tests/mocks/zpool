@@ -1,0 +1,70 @@
+#!/bin/bash
+#
+# Mock zpool command for testing
+#
+
+MOCK_ZPOOL_DIR="${MOCK_ZPOOL_DIR:-/tmp/mock_zpool}"
+mkdir -p "$MOCK_ZPOOL_DIR"
+
+case "$1" in
+    create)
+        shift
+        # Parse arguments
+        pool_name=""
+        pool_type=""
+        disks=""
+
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+                -f|-o|-O)
+                    shift 2
+                    ;;
+                mirror|raidz1|raidz2)
+                    pool_type="$1"
+                    shift
+                    ;;
+                /dev/*)
+                    disks="$disks $1"
+                    shift
+                    ;;
+                *)
+                    if [[ -z "$pool_name" ]]; then
+                        pool_name="$1"
+                    fi
+                    shift
+                    ;;
+            esac
+        done
+
+        # Record the pool creation
+        echo "pool=$pool_name type=$pool_type disks=$disks" > "$MOCK_ZPOOL_DIR/$pool_name"
+        echo "Pool '$pool_name' created"
+        ;;
+    status)
+        pool_name="${2:-rpool}"
+        if [[ -f "$MOCK_ZPOOL_DIR/$pool_name" ]]; then
+            echo "  pool: $pool_name"
+            echo " state: ONLINE"
+            echo "config:"
+            echo "        NAME        STATE     READ WRITE CKSUM"
+            echo "        $pool_name  ONLINE       0     0     0"
+        else
+            echo "cannot open '$pool_name': no such pool"
+            exit 1
+        fi
+        ;;
+    labelclear)
+        # Just succeed
+        ;;
+    list)
+        for pool_file in "$MOCK_ZPOOL_DIR"/*; do
+            if [[ -f "$pool_file" ]]; then
+                basename "$pool_file"
+            fi
+        done
+        ;;
+    *)
+        echo "Mock zpool: unhandled command: $*" >&2
+        exit 1
+        ;;
+esac

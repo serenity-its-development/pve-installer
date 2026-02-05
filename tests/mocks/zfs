@@ -1,0 +1,47 @@
+#!/bin/bash
+#
+# Mock zfs command for testing
+#
+
+MOCK_ZFS_DIR="${MOCK_ZFS_DIR:-/tmp/mock_zfs}"
+mkdir -p "$MOCK_ZFS_DIR"
+
+case "$1" in
+    create)
+        shift
+        dataset=""
+        mountpoint=""
+
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+                -o)
+                    if [[ "$2" == mountpoint=* ]]; then
+                        mountpoint="${2#mountpoint=}"
+                    fi
+                    shift 2
+                    ;;
+                *)
+                    dataset="$1"
+                    shift
+                    ;;
+            esac
+        done
+
+        echo "mountpoint=$mountpoint" > "$MOCK_ZFS_DIR/${dataset//\//_}"
+        ;;
+    list)
+        echo "NAME                 USED  AVAIL  REFER  MOUNTPOINT"
+        for ds_file in "$MOCK_ZFS_DIR"/*; do
+            if [[ -f "$ds_file" ]]; then
+                ds_name="${ds_file##*/}"
+                ds_name="${ds_name//_/\/}"
+                mountpoint=$(cat "$ds_file" | grep mountpoint | cut -d= -f2)
+                echo "$ds_name  100G  900G  100G  $mountpoint"
+            fi
+        done
+        ;;
+    *)
+        echo "Mock zfs: unhandled command: $*" >&2
+        exit 1
+        ;;
+esac

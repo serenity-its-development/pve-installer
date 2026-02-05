@@ -1,0 +1,79 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  syntax-check:
+    name: Syntax Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check shell script syntax
+        run: |
+          for script in build/*.sh installer/*.sh post-install/*.sh; do
+            if [[ -f "$script" ]]; then
+              echo "Checking: $script"
+              bash -n "$script"
+            fi
+          done
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bats
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bats
+
+      - name: Make scripts executable
+        run: |
+          chmod +x build/*.sh installer/*.sh post-install/*.sh
+          chmod +x tests/mocks/*
+          chmod +x tests/*.sh
+
+      - name: Run unit tests
+        run: |
+          cd tests
+          bats unit/*.bats
+
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: Run ShellCheck
+        run: |
+          shellcheck -x build/*.sh installer/*.sh post-install/*.sh || true
+        continue-on-error: true
+
+  build-test:
+    name: Build Test (Dry Run)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y live-build debootstrap
+
+      - name: Verify build script structure
+        run: |
+          # Check that build script has all required functions
+          grep -q "check_requirements" build/build-usb.sh
+          grep -q "setup_build_dir" build/build-usb.sh
+          grep -q "configure_packages" build/build-usb.sh
+          grep -q "build_image" build/build-usb.sh
+          echo "Build script structure verified"

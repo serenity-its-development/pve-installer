@@ -1,5 +1,17 @@
 # Force LF line endings for shell scripts (they run on Linux)
 *.sh text eol=lf
+*.bash text eol=lf
+*.bats text eol=lf
+
+# Mock scripts (no extension) also need LF
+tests/mocks/* text eol=lf
+
+# PowerShell scripts can use CRLF (Windows)
+*.ps1 text eol=crlf
+
+# YAML files
+*.yml text eol=lf
+*.yaml text eol=lf
 
 # Default behavior for text files
 * text=auto
