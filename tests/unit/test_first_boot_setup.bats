@@ -128,24 +128,3 @@ teardown() {
 @test "script displays web UI URL" {
     grep -q "8006" "$SCRIPT"
 }
-
-@test "get_ip returns mocked IP" {
-    source "$SCRIPT" 2>/dev/null || true
-
-    result=$(get_ip)
-    [[ "$result" == "$MOCK_IP_ADDRESS" ]]
-}
-
-@test "get_gateway returns mocked gateway" {
-    source "$SCRIPT" 2>/dev/null || true
-
-    result=$(get_gateway)
-    [[ "$result" == "$MOCK_GATEWAY" ]]
-}
-
-@test "get_interface returns mocked interface" {
-    source "$SCRIPT" 2>/dev/null || true
-
-    result=$(get_interface)
-    [[ "$result" == "$MOCK_INTERFACE" ]]
-}

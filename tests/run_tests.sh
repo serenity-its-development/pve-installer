@@ -123,9 +123,11 @@ run_integration_tests() {
         return 0
     fi
 
-    local test_files=("$test_dir"/*.bats 2>/dev/null)
+    shopt -s nullglob
+    local test_files=("$test_dir"/*.bats)
+    shopt -u nullglob
 
-    if [[ ${#test_files[@]} -eq 0 ]] || [[ ! -f "${test_files[0]}" ]]; then
+    if [[ ${#test_files[@]} -eq 0 ]]; then
         log_warn "No .bats files found in $test_dir"
         return 0
     fi

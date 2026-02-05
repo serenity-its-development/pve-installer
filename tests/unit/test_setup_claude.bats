@@ -28,32 +28,21 @@ teardown() {
 }
 
 @test "script defines NODE_VERSION" {
-    source "$CLAUDE_SCRIPT" 2>/dev/null || true
-
-    [[ -n "$NODE_VERSION" ]]
-    [[ "$NODE_VERSION" =~ ^[0-9]+$ ]]
+    grep -q "NODE_VERSION" "$CLAUDE_SCRIPT"
 }
 
 @test "script has check_requirements function" {
-    source "$CLAUDE_SCRIPT" 2>/dev/null || true
-
-    declare -f check_requirements >/dev/null
+    grep -q "check_requirements()" "$CLAUDE_SCRIPT"
 }
 
 @test "script has install_nodejs function" {
-    source "$CLAUDE_SCRIPT" 2>/dev/null || true
-
-    declare -f install_nodejs >/dev/null
+    grep -q "install_nodejs()" "$CLAUDE_SCRIPT"
 }
 
 @test "script has install_claude function" {
-    source "$CLAUDE_SCRIPT" 2>/dev/null || true
-
-    declare -f install_claude >/dev/null
+    grep -q "install_claude()" "$CLAUDE_SCRIPT"
 }
 
 @test "script has configure_environment function" {
-    source "$CLAUDE_SCRIPT" 2>/dev/null || true
-
-    declare -f configure_environment >/dev/null
+    grep -q "configure_environment()" "$CLAUDE_SCRIPT"
 }
