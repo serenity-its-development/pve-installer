@@ -1,0 +1,16 @@
+[Unit]
+Description=PVE Claude Code First Boot Setup
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=!/var/lib/pve-claude-setup-done
+
+[Service]
+Type=oneshot
+ExecStart=/root/first-boot-setup.sh --auto
+ExecStartPost=/usr/bin/touch /var/lib/pve-claude-setup-done
+RemainAfterExit=yes
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

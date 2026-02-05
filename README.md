@@ -39,26 +39,21 @@ This will:
 3. **Follow** the installer prompts
 4. **Reboot** when complete
 
-### 4. First Boot Setup
+### 4. First Boot (Automatic!)
 
-SSH into your new Proxmox server and run:
+After Proxmox reboots, **Claude setup runs automatically!**
 
+Just SSH into your server:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/serenity-its-development/pve-installer/main/post-install/first-boot-setup.sh | bash
+ssh root@<your-server-ip>
 ```
 
-Or if you have the USB mounted:
+You'll see a message that Claude is ready. Type `tm` to attach.
 
-```bash
-bash /mnt/usb/pve-installer/scripts/first-boot-setup.sh
-```
-
-This will:
-- Test network connectivity
-- Configure repositories
-- Install Node.js and Claude Code
-- Start Claude in a tmux session
-- Guide you through authentication
+> **If auto-setup didn't run**, you can trigger it manually:
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/serenity-its-development/pve-installer/main/post-install/first-boot-setup.sh | bash
+> ```
 
 ### 5. Use Claude
 
@@ -121,14 +116,18 @@ pve-installer/
 │      └─→ Select disk, configure network (DHCP)              │
 │          └─→ Installation completes, reboot                 │
 │                                                              │
-│  First Boot (Proxmox)                                        │
-│  └─→ SSH in, run first-boot-setup.sh                        │
-│      └─→ Network tested                                      │
-│      └─→ Repos configured                                    │
-│      └─→ Claude Code installed                               │
-│      └─→ Claude session started (tmux)                       │
-│          └─→ Authenticate Claude                             │
-│          └─→ Use Claude to configure server                  │
+│  First Boot (AUTOMATIC)                                      │
+│  └─→ Systemd service runs first-boot-setup.sh               │
+│      └─→ Waits for network ✓                                │
+│      └─→ Configures repos ✓                                  │
+│      └─→ Installs Node.js ✓                                  │
+│      └─→ Installs Claude Code ✓                              │
+│      └─→ Starts Claude session ✓                             │
+│                                                              │
+│  You SSH in                                                  │
+│  └─→ Type 'tm' to attach to Claude                          │
+│      └─→ Authenticate if needed                              │
+│      └─→ Start configuring your server!                      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
