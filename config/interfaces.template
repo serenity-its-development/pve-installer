@@ -1,0 +1,49 @@
+# /etc/network/interfaces template for Proxmox VE
+#
+# Variables to replace:
+#   {{INTERFACE}} - Primary network interface (e.g., eth0, ens18)
+#   {{IP_ADDRESS}} - IP address
+#   {{NETMASK}} - Netmask in CIDR notation (e.g., 24)
+#   {{GATEWAY}} - Default gateway
+
+auto lo
+iface lo inet loopback
+
+# Option 1: Simple static IP (no bridge)
+# Use this if you don't need VM networking through the host interface
+#
+#auto {{INTERFACE}}
+#iface {{INTERFACE}} inet static
+#    address {{IP_ADDRESS}}/{{NETMASK}}
+#    gateway {{GATEWAY}}
+
+# Option 2: Bridge configuration (recommended for VMs)
+# This allows VMs to share the host's network interface
+#
+iface {{INTERFACE}} inet manual
+
+auto vmbr0
+iface vmbr0 inet static
+    address {{IP_ADDRESS}}/{{NETMASK}}
+    gateway {{GATEWAY}}
+    bridge-ports {{INTERFACE}}
+    bridge-stp off
+    bridge-fd 0
+
+# Optional: Additional VLAN bridge
+# Uncomment and configure for VLAN support
+#
+#auto vmbr0.{{VLAN_ID}}
+#iface vmbr0.{{VLAN_ID}} inet static
+#    address {{VLAN_IP}}/{{VLAN_NETMASK}}
+#    vlan-raw-device vmbr0
+
+# Optional: Second bridge for internal/isolated network
+# No bridge-ports means VMs can only talk to each other
+#
+#auto vmbr1
+#iface vmbr1 inet static
+#    address 10.10.10.1/24
+#    bridge-ports none
+#    bridge-stp off
+#    bridge-fd 0

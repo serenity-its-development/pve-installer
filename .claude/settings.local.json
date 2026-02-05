@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git -C \"d:/Development/Projects/Claude/pve-installer\" remote -v)"
+      "Bash(git -C \"d:/Development/Projects/Claude/pve-installer\" remote -v)",
+      "Bash(powershell.exe:*)"
     ]
   }
 }
