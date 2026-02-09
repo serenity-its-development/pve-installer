@@ -546,12 +546,12 @@ function Write-IsoToUSB {
         }
     }
 
-    # Clean via diskpart (more reliable than Clear-Disk for raw write)
+    # Clean and take offline via diskpart so Windows won't interfere during write
     Write-Status "Cleaning disk partition table..."
-    $diskpartScript = "select disk $diskNumber`nclean"
+    $diskpartScript = "select disk $diskNumber`nclean`nattributes disk clear readonly`noffline disk"
     $diskpartScript | & "$env:SystemRoot\System32\diskpart.exe" | Out-Null
-    Start-Sleep -Seconds 2
-    Write-Success "Disk cleared"
+    Start-Sleep -Seconds 3
+    Write-Success "Disk cleared and taken offline"
 
     Write-Status "Writing ISO to USB (DD mode)..."
     # Use FileStream with proper flags for raw device access
@@ -598,6 +598,13 @@ function Write-IsoToUSB {
     Write-Host ""
     $writeElapsed = (Get-Date) - $writeStart
     $avgSpeed = [math]::Round($totalMB / $writeElapsed.TotalSeconds, 1)
+
+    # Bring disk back online for answer partition creation
+    Write-Status "Bringing disk back online..."
+    $diskpartOnline = "select disk $diskNumber`nonline disk"
+    $diskpartOnline | & "$env:SystemRoot\System32\diskpart.exe" | Out-Null
+    Start-Sleep -Seconds 2
+
     Write-StepComplete "ISO written ($totalMB MB @ $avgSpeed MB/s)"
 }
 
