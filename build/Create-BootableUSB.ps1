@@ -541,7 +541,7 @@ function Write-IsoToUSB {
             $vol = Get-Volume -DriveLetter $_.DriveLetter -ErrorAction SilentlyContinue
             if ($vol) {
                 # Use mountvol to dismount
-                & mountvol "$($_.DriveLetter):" /P 2>$null
+                & "$env:SystemRoot\System32\mountvol.exe" "$($_.DriveLetter):\" /P 2>$null
             }
         }
     }
