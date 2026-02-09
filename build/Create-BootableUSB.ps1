@@ -529,29 +529,22 @@ function Write-IsoToUSB {
 
     $diskNumber = $UsbDrive.DiskNumber
 
-    Write-Status "Preparing disk $diskNumber..."
-    # Set disk online and writable
-    Set-Disk -Number $diskNumber -IsOffline $false -ErrorAction SilentlyContinue
-    Set-Disk -Number $diskNumber -IsReadOnly $false -ErrorAction SilentlyContinue
-
-    # Dismount all volumes on the disk so Windows releases its lock
-    Get-Partition -DiskNumber $diskNumber -ErrorAction SilentlyContinue | ForEach-Object {
-        if ($_.DriveLetter) {
-            Write-Status "Dismounting volume $($_.DriveLetter):..."
-            $vol = Get-Volume -DriveLetter $_.DriveLetter -ErrorAction SilentlyContinue
-            if ($vol) {
-                # Use mountvol to dismount
-                & "$env:SystemRoot\System32\mountvol.exe" "$($_.DriveLetter):\" /P 2>$null
-            }
-        }
-    }
-
-    # Clean and take offline via diskpart so Windows won't interfere during write
-    Write-Status "Cleaning disk partition table..."
-    $diskpartScript = "select disk $diskNumber`nclean`nattributes disk clear readonly`noffline disk"
-    $diskpartScript | & "$env:SystemRoot\System32\diskpart.exe" | Out-Null
+    # Use diskpart for ALL disk prep - it handles offline/locked/bad-state disks
+    # unlike Set-Disk which hangs on corrupted offline disks
+    Write-Status "Preparing disk $diskNumber via diskpart..."
+    $dpCommands = @"
+select disk $diskNumber
+online disk noerr
+attributes disk clear readonly noerr
+clean
+offline disk noerr
+"@
+    $dpTempFile = [System.IO.Path]::GetTempFileName()
+    $dpCommands | Out-File -FilePath $dpTempFile -Encoding ASCII
+    $dpResult = & "$env:SystemRoot\System32\diskpart.exe" /s $dpTempFile 2>&1
+    Remove-Item $dpTempFile -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 3
-    Write-Success "Disk cleared and taken offline"
+    Write-Success "Disk cleaned and taken offline"
 
     Write-Status "Writing ISO to USB (DD mode)..."
     # Use FileStream with proper flags for raw device access
@@ -601,8 +594,11 @@ function Write-IsoToUSB {
 
     # Bring disk back online for answer partition creation
     Write-Status "Bringing disk back online..."
-    $diskpartOnline = "select disk $diskNumber`nonline disk"
-    $diskpartOnline | & "$env:SystemRoot\System32\diskpart.exe" | Out-Null
+    $dpOnline = "select disk $diskNumber`nonline disk noerr"
+    $dpTempFile = [System.IO.Path]::GetTempFileName()
+    $dpOnline | Out-File -FilePath $dpTempFile -Encoding ASCII
+    & "$env:SystemRoot\System32\diskpart.exe" /s $dpTempFile 2>&1 | Out-Null
+    Remove-Item $dpTempFile -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 2
 
     Write-StepComplete "ISO written ($totalMB MB @ $avgSpeed MB/s)"
