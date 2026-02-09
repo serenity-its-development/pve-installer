@@ -41,17 +41,62 @@ $PveIsoUrl = "https://enterprise.proxmox.com/iso/proxmox-ve_$PveVersion-1.iso"
 $RufusUrl = "https://github.com/pbatard/rufus/releases/download/v4.6/rufus-4.6p.exe"
 $SetupScriptUrl = "https://raw.githubusercontent.com/serenity-its-development/pve-installer/main/post-install/first-boot-setup.sh"
 
-# Colors
-function Write-Status { param([string]$Message) Write-Host "[*] $Message" -ForegroundColor Cyan }
-function Write-Success { param([string]$Message) Write-Host "[+] $Message" -ForegroundColor Green }
-function Write-Warn { param([string]$Message) Write-Host "[!] $Message" -ForegroundColor Yellow }
-function Write-Err { param([string]$Message) Write-Host "[-] $Message" -ForegroundColor Red }
+# Step tracking
+$script:TotalSteps = 5
+$script:CurrentStep = 0
+$script:StepStartTime = $null
+$script:OverallStartTime = $null
+
+# --- Progress & Output Helpers ---
+
+function Write-StepHeader {
+    param([string]$Description)
+
+    $script:CurrentStep++
+    $script:StepStartTime = Get-Date
+
+    $bar = "=" * 50
+    Write-Host ""
+    Write-Host $bar -ForegroundColor DarkCyan
+    Write-Host "  Step $($script:CurrentStep)/$($script:TotalSteps): $Description" -ForegroundColor Cyan
+    Write-Host $bar -ForegroundColor DarkCyan
+    Write-Host ""
+}
+
+function Write-StepComplete {
+    param([string]$Message)
+
+    $elapsed = (Get-Date) - $script:StepStartTime
+    $timeStr = "{0:mm\:ss}" -f $elapsed
+    Write-Host "  [OK] $Message ($timeStr)" -ForegroundColor Green
+}
+
+function Write-Status { param([string]$Message) Write-Host "  [*] $Message" -ForegroundColor Gray }
+function Write-Success { param([string]$Message) Write-Host "  [+] $Message" -ForegroundColor Green }
+function Write-Warn { param([string]$Message) Write-Host "  [!] $Message" -ForegroundColor Yellow }
+function Write-Err { param([string]$Message) Write-Host "  [-] $Message" -ForegroundColor Red }
+
+function Write-ProgressBar {
+    param(
+        [int]$Percent,
+        [string]$Status,
+        [int]$BarWidth = 40
+    )
+
+    $filled = [math]::Floor($BarWidth * $Percent / 100)
+    $empty = $BarWidth - $filled
+    $bar = ("#" * $filled) + ("-" * $empty)
+
+    Write-Host -NoNewline "`r  [$bar] $Percent% $Status    "
+}
 
 function Test-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($identity)
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
+
+# --- USB Detection ---
 
 function Get-USBDrives {
     $disks = Get-Disk | Where-Object { $_.BusType -eq 'USB' }
@@ -82,7 +127,9 @@ function Get-USBDrives {
 }
 
 function Select-USBDrive {
-    Write-Status "Detecting USB drives..."
+    Write-StepHeader "Select USB Drive"
+
+    Write-Status "Scanning for USB drives..."
 
     $drives = Get-USBDrives
 
@@ -91,17 +138,19 @@ function Select-USBDrive {
         exit 1
     }
 
-    Write-Host "`nAvailable USB Drives:" -ForegroundColor White
-    Write-Host "=====================" -ForegroundColor White
+    Write-Success "Found $($drives.Count) USB drive(s)"
+    Write-Host ""
+    Write-Host "  Available USB Drives:" -ForegroundColor White
+    Write-Host "  ---------------------" -ForegroundColor DarkGray
 
     for ($i = 0; $i -lt $drives.Count; $i++) {
         $drive = $drives[$i]
         $letter = if ($drive.DriveLetter) { "$($drive.DriveLetter):" } else { "(No letter)" }
-        Write-Host "$($i + 1). $letter - $($drive.Model) ($($drive.Size) GB)"
+        Write-Host "    $($i + 1). $letter - $($drive.Model) ($($drive.Size) GB)" -ForegroundColor White
     }
 
     Write-Host ""
-    $selection = Read-Host "Select drive (1-$($drives.Count))"
+    $selection = Read-Host "  Select drive (1-$($drives.Count))"
     $index = [int]$selection - 1
 
     if ($index -lt 0 -or $index -ge $drives.Count) {
@@ -109,11 +158,99 @@ function Select-USBDrive {
         exit 1
     }
 
-    return $drives[$index]
+    $selected = $drives[$index]
+    Write-StepComplete "Selected: $($selected.Model) ($($selected.Size) GB)"
+    return $selected
+}
+
+# --- Downloads ---
+
+function Download-WithProgress {
+    param(
+        [string]$Url,
+        [string]$Destination,
+        [string]$DisplayName
+    )
+
+    # Try BITS first (has built-in progress)
+    try {
+        Write-Status "Method: BITS Transfer"
+        $bitsJob = Start-BitsTransfer -Source $Url -Destination $Destination -DisplayName $DisplayName -Asynchronous
+
+        while ($bitsJob.JobState -eq 'Transferring' -or $bitsJob.JobState -eq 'Connecting') {
+            $transferred = $bitsJob.BytesTransferred
+            $total = $bitsJob.BytesTotal
+
+            if ($total -gt 0) {
+                $percent = [math]::Round(($transferred / $total) * 100)
+                $mbTransferred = [math]::Round($transferred / 1MB)
+                $mbTotal = [math]::Round($total / 1MB)
+                Write-ProgressBar -Percent $percent -Status "${mbTransferred} MB / ${mbTotal} MB"
+            }
+            else {
+                $mbTransferred = [math]::Round($transferred / 1MB)
+                Write-Host -NoNewline "`r  [Downloading...] ${mbTransferred} MB transferred    "
+            }
+
+            Start-Sleep -Milliseconds 500
+        }
+
+        if ($bitsJob.JobState -eq 'Transferred') {
+            Complete-BitsTransfer -BitsJob $bitsJob
+            Write-Host ""
+            return $true
+        }
+        else {
+            Write-Host ""
+            Remove-BitsTransfer -BitsJob $bitsJob -ErrorAction SilentlyContinue
+            throw "BITS transfer ended with state: $($bitsJob.JobState)"
+        }
+    }
+    catch {
+        Write-Host ""
+        Write-Warn "BITS transfer failed: $_"
+        Write-Status "Falling back to WebClient with progress..."
+
+        # Fallback: WebClient with event-based progress
+        try {
+            $webClient = New-Object System.Net.WebClient
+
+            $downloadComplete = $false
+
+            Register-ObjectEvent -InputObject $webClient -EventName DownloadProgressChanged -Action {
+                $percent = $EventArgs.ProgressPercentage
+                $mbReceived = [math]::Round($EventArgs.BytesReceived / 1MB)
+                $mbTotal = [math]::Round($EventArgs.TotalBytesToReceive / 1MB)
+                Write-Host -NoNewline "`r  [$('#' * [math]::Floor(40 * $percent / 100))$('-' * (40 - [math]::Floor(40 * $percent / 100)))] ${percent}% ${mbReceived} MB / ${mbTotal} MB    "
+            } | Out-Null
+
+            Register-ObjectEvent -InputObject $webClient -EventName DownloadFileCompleted -Action {
+                $script:downloadComplete = $true
+            } | Out-Null
+
+            $webClient.DownloadFileAsync([Uri]$Url, $Destination)
+
+            while (-not $downloadComplete) {
+                Start-Sleep -Milliseconds 200
+            }
+
+            Write-Host ""
+            $webClient.Dispose()
+            return $true
+        }
+        catch {
+            Write-Host ""
+            Write-Warn "WebClient failed too, using Invoke-WebRequest (no granular progress)..."
+            $ProgressPreference = 'SilentlyContinue'
+            Invoke-WebRequest -Uri $Url -OutFile $Destination -UseBasicParsing
+            $ProgressPreference = 'Continue'
+            return $true
+        }
+    }
 }
 
 function Download-ProxmoxISO {
-    Write-Status "Downloading Proxmox VE $PveVersion ISO..."
+    Write-StepHeader "Download Proxmox VE ISO"
 
     if (-not (Test-Path $DownloadDir)) {
         New-Item -ItemType Directory -Path $DownloadDir | Out-Null
@@ -122,24 +259,26 @@ function Download-ProxmoxISO {
     $isoPath = Join-Path $DownloadDir "proxmox-ve_$PveVersion.iso"
 
     if ((Test-Path $isoPath) -and $SkipDownload) {
-        Write-Success "Using existing ISO: $isoPath"
+        $sizeMB = [math]::Round((Get-Item $isoPath).Length / 1MB)
+        Write-Success "Using cached ISO (${sizeMB} MB): $isoPath"
+        Write-StepComplete "ISO ready (cached)"
         return $isoPath
     }
 
-    Write-Status "Downloading from: $PveIsoUrl"
-    Write-Status "This will take a while (~1.2 GB)..."
-
-    try {
-        Start-BitsTransfer -Source $PveIsoUrl -Destination $isoPath -DisplayName "Proxmox VE ISO"
-    }
-    catch {
-        Write-Warn "BITS failed, using WebRequest..."
-        $ProgressPreference = 'SilentlyContinue'
-        Invoke-WebRequest -Uri $PveIsoUrl -OutFile $isoPath -UseBasicParsing
-        $ProgressPreference = 'Continue'
+    if (Test-Path $isoPath) {
+        $sizeMB = [math]::Round((Get-Item $isoPath).Length / 1MB)
+        Write-Status "Found existing download (${sizeMB} MB)"
+        Write-Status "Re-downloading to ensure latest version..."
     }
 
-    Write-Success "Download complete: $isoPath"
+    Write-Status "Source: $PveIsoUrl"
+    Write-Status "Size: ~1.2 GB"
+    Write-Host ""
+
+    Download-WithProgress -Url $PveIsoUrl -Destination $isoPath -DisplayName "Proxmox VE $PveVersion ISO"
+
+    $sizeMB = [math]::Round((Get-Item $isoPath).Length / 1MB)
+    Write-StepComplete "Downloaded ${sizeMB} MB"
     return $isoPath
 }
 
@@ -147,19 +286,20 @@ function Download-Rufus {
     $rufusPath = Join-Path $DownloadDir "rufus.exe"
 
     if (Test-Path $rufusPath) {
+        Write-Status "Using cached Rufus"
         return $rufusPath
     }
 
     Write-Status "Downloading Rufus..."
-    Invoke-WebRequest -Uri $RufusUrl -OutFile $rufusPath -UseBasicParsing
+    Download-WithProgress -Url $RufusUrl -Destination $rufusPath -DisplayName "Rufus"
+    Write-Success "Rufus downloaded"
 
     return $rufusPath
 }
 
-function Create-AutoSetupScript {
-    Write-Status "Creating auto-setup configuration..."
+# --- Auto-Setup ---
 
-    # Create the post-install hook script
+function Create-AutoSetupScript {
     $hookScript = @'
 #!/bin/bash
 # PVE Claude Auto-Setup Hook
@@ -208,9 +348,6 @@ echo "Claude auto-setup configured for first boot"
 function Create-AnswerFile {
     param([string]$HookScript)
 
-    Write-Status "Creating automated installation answer file..."
-
-    # Encode hook script for embedding
     $hookBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($HookScript))
 
     $answerToml = @"
@@ -256,92 +393,22 @@ post = [
     return $answerToml
 }
 
-function Write-USBWithRufus {
-    param(
-        [string]$IsoPath,
-        [PSCustomObject]$UsbDrive
-    )
-
-    $rufusPath = Download-Rufus
-
-    Write-Host ""
-    Write-Host "==========================================" -ForegroundColor Yellow
-    Write-Host "  RUFUS WILL NOW OPEN" -ForegroundColor Yellow
-    Write-Host "==========================================" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "In Rufus:"
-    Write-Host "  1. Select your USB drive: $($UsbDrive.Model)"
-    Write-Host "  2. Click SELECT and choose: $IsoPath"
-    Write-Host "  3. Click START"
-    Write-Host "  4. Choose 'Write in DD Image mode' when prompted"
-    Write-Host "  5. Wait for completion"
-    Write-Host ""
-
-    Read-Host "Press Enter to open Rufus"
-
-    Start-Process -FilePath $rufusPath -Wait
-}
-
-function Write-USBDirect {
-    param(
-        [string]$IsoPath,
-        [PSCustomObject]$UsbDrive
-    )
-
-    $diskNumber = $UsbDrive.DiskNumber
-
-    Write-Host ""
-    Write-Host "WARNING: This will ERASE ALL DATA on Disk $diskNumber ($($UsbDrive.Model))" -ForegroundColor Red
-    Write-Host ""
-    $confirm = Read-Host "Type 'YES' to continue"
-
-    if ($confirm -ne "YES") {
-        Write-Warn "Aborted"
-        exit 0
-    }
-
-    Write-Status "Writing ISO to USB (this will take several minutes)..."
-
-    # Clear the disk
-    Clear-Disk -Number $diskNumber -RemoveData -RemoveOEM -Confirm:$false -ErrorAction SilentlyContinue
-
-    # Write ISO using dd-like method
-    $source = [System.IO.File]::OpenRead($IsoPath)
-    $dest = [System.IO.File]::OpenWrite("\\.\PhysicalDrive$diskNumber")
-
-    $buffer = New-Object byte[] (4MB)
-    $totalBytes = $source.Length
-    $bytesWritten = 0
-
-    try {
-        while (($read = $source.Read($buffer, 0, $buffer.Length)) -gt 0) {
-            $dest.Write($buffer, 0, $read)
-            $bytesWritten += $read
-            $percent = [math]::Round(($bytesWritten / $totalBytes) * 100)
-            Write-Progress -Activity "Writing ISO" -Status "$percent% complete" -PercentComplete $percent
-        }
-    }
-    finally {
-        $source.Close()
-        $dest.Close()
-    }
-
-    Write-Progress -Activity "Writing ISO" -Completed
-    Write-Success "ISO written to USB"
-}
+# --- Setup Files ---
 
 function Create-InstructionFiles {
     param([string]$AnswerToml)
 
-    Write-Status "Creating instruction files..."
+    Write-StepHeader "Create Setup Files"
 
+    Write-Status "Generating answer file..."
     $instructionsDir = Join-Path $DownloadDir "pve-installer-files"
     New-Item -ItemType Directory -Path $instructionsDir -Force | Out-Null
 
-    # Save answer file
     $AnswerToml | Out-File -FilePath (Join-Path $instructionsDir "answer.toml") -Encoding UTF8 -NoNewline
+    Write-Success "answer.toml created"
 
-    # Create quick-start guide
+    Write-Status "Generating quick-start guide..."
+
     $quickStart = @"
 PVE INSTALLER - QUICK START
 ============================
@@ -369,7 +436,7 @@ After installation, the system will automatically:
   - Install Claude Code
   - Start Claude in a tmux session
 
-Just SSH into your server and type: tm
+Just log in at the console and type: tm
 
 STEP 4: USE CLAUDE
 ------------------
@@ -394,48 +461,172 @@ TROUBLESHOOTING
 "@
 
     $quickStart | Out-File -FilePath (Join-Path $instructionsDir "QUICK-START.txt") -Encoding UTF8
+    Write-Success "QUICK-START.txt created"
 
-    Write-Success "Instruction files created in: $instructionsDir"
-
+    Write-StepComplete "Setup files ready"
     return $instructionsDir
 }
 
-function Show-Completion {
+# --- USB Writing ---
+
+function Write-USBWithRufus {
     param(
         [string]$IsoPath,
-        [string]$InstructionsDir
+        [PSCustomObject]$UsbDrive
     )
 
+    Write-Status "Downloading Rufus..."
+    $rufusPath = Download-Rufus
+
     Write-Host ""
-    Write-Host "==========================================" -ForegroundColor Green
-    Write-Host "  USB DRIVE READY!" -ForegroundColor Green
-    Write-Host "==========================================" -ForegroundColor Green
+    Write-Host "  ==========================================" -ForegroundColor Yellow
+    Write-Host "    RUFUS WILL NOW OPEN" -ForegroundColor Yellow
+    Write-Host "  ==========================================" -ForegroundColor Yellow
     Write-Host ""
-    Write-Host "WHAT'S ON THE USB:" -ForegroundColor Yellow
-    Write-Host "  - Proxmox VE $PveVersion installer"
+    Write-Host "  In Rufus:" -ForegroundColor White
+    Write-Host "    1. Select your USB drive: $($UsbDrive.Model)" -ForegroundColor Gray
+    Write-Host "    2. Click SELECT and choose:" -ForegroundColor Gray
+    Write-Host "       $IsoPath" -ForegroundColor Cyan
+    Write-Host "    3. Click START" -ForegroundColor Gray
+    Write-Host "    4. Choose 'Write in DD Image mode' when prompted" -ForegroundColor Gray
+    Write-Host "    5. Wait for completion" -ForegroundColor Gray
     Write-Host ""
-    Write-Host "NEXT STEPS:" -ForegroundColor Yellow
+
+    Read-Host "  Press Enter to open Rufus"
+
+    Start-Process -FilePath $rufusPath -Wait
+}
+
+function Write-USBDirect {
+    param(
+        [string]$IsoPath,
+        [PSCustomObject]$UsbDrive
+    )
+
+    $diskNumber = $UsbDrive.DiskNumber
+
     Write-Host ""
-    Write-Host "  1. Boot your server from the USB"
-    Write-Host "  2. Install Proxmox VE (follow prompts)"
-    Write-Host "  3. After reboot, Claude auto-setup runs!"
-    Write-Host "  4. SSH in and type: tm"
+    Write-Host "  WARNING: This will ERASE ALL DATA on Disk $diskNumber ($($UsbDrive.Model))" -ForegroundColor Red
     Write-Host ""
-    Write-Host "FILES CREATED:" -ForegroundColor Yellow
-    Write-Host "  $InstructionsDir\QUICK-START.txt"
-    Write-Host "  $InstructionsDir\answer.toml (for automated install)"
+    $confirm = Read-Host "  Type 'YES' to continue"
+
+    if ($confirm -ne "YES") {
+        Write-Warn "Aborted"
+        exit 0
+    }
+
+    Write-Status "Clearing disk..."
+    Clear-Disk -Number $diskNumber -RemoveData -RemoveOEM -Confirm:$false -ErrorAction SilentlyContinue
+    Write-Success "Disk cleared"
+
+    Write-Status "Writing ISO to USB..."
+    $source = [System.IO.File]::OpenRead($IsoPath)
+    $dest = [System.IO.File]::OpenWrite("\\.\PhysicalDrive$diskNumber")
+
+    $buffer = New-Object byte[] (4MB)
+    $totalBytes = $source.Length
+    $totalMB = [math]::Round($totalBytes / 1MB)
+    $bytesWritten = 0
+    $writeStart = Get-Date
+
+    try {
+        while (($read = $source.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            $dest.Write($buffer, 0, $read)
+            $bytesWritten += $read
+            $percent = [math]::Round(($bytesWritten / $totalBytes) * 100)
+            $mbWritten = [math]::Round($bytesWritten / 1MB)
+
+            # Calculate speed and ETA
+            $elapsed = (Get-Date) - $writeStart
+            if ($elapsed.TotalSeconds -gt 0) {
+                $speedMBs = [math]::Round($mbWritten / $elapsed.TotalSeconds, 1)
+                $remainingMB = $totalMB - $mbWritten
+                if ($speedMBs -gt 0) {
+                    $etaSeconds = [math]::Round($remainingMB / $speedMBs)
+                    $etaStr = "ETA {0:mm\:ss}" -f [TimeSpan]::FromSeconds($etaSeconds)
+                }
+                else {
+                    $etaStr = "ETA --:--"
+                }
+                Write-ProgressBar -Percent $percent -Status "${mbWritten}/${totalMB} MB @ ${speedMBs} MB/s - $etaStr"
+            }
+            else {
+                Write-ProgressBar -Percent $percent -Status "${mbWritten}/${totalMB} MB"
+            }
+        }
+    }
+    finally {
+        $source.Close()
+        $dest.Close()
+    }
+
     Write-Host ""
-    Write-Host "If auto-setup doesn't run, SSH in and run:" -ForegroundColor Yellow
-    Write-Host "  curl -fsSL $SetupScriptUrl | bash" -ForegroundColor Cyan
+    $writeElapsed = (Get-Date) - $writeStart
+    $avgSpeed = [math]::Round($totalMB / $writeElapsed.TotalSeconds, 1)
+    Write-Success "ISO written ($totalMB MB in {0:mm\:ss} @ $avgSpeed MB/s)" -f $writeElapsed
+}
+
+function Write-IsoToUSB {
+    Write-StepHeader "Write ISO to USB"
+
+    Write-Host "  Choose write method:" -ForegroundColor White
+    Write-Host "    1. Use Rufus (Recommended - more reliable)" -ForegroundColor Gray
+    Write-Host "    2. Direct write (Faster, no extra software)" -ForegroundColor Gray
+    Write-Host ""
+    $method = Read-Host "  Select (1 or 2)"
+
+    if ($method -eq "2") {
+        Write-USBDirect -IsoPath $script:isoPath -UsbDrive $script:selectedDrive
+    }
+    else {
+        Write-USBWithRufus -IsoPath $script:isoPath -UsbDrive $script:selectedDrive
+    }
+
+    Write-StepComplete "USB drive written"
+}
+
+# --- Completion ---
+
+function Show-Completion {
+    param([string]$InstructionsDir)
+
+    $totalElapsed = (Get-Date) - $script:OverallStartTime
+    $totalTime = "{0:mm\:ss}" -f $totalElapsed
+
+    Write-Host ""
+    Write-Host "  ==========================================" -ForegroundColor Green
+    Write-Host "    USB DRIVE READY!  (Total time: $totalTime)" -ForegroundColor Green
+    Write-Host "  ==========================================" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "  WHAT'S ON THE USB:" -ForegroundColor Yellow
+    Write-Host "    - Proxmox VE $PveVersion installer" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  NEXT STEPS:" -ForegroundColor Yellow
+    Write-Host "    1. Plug USB into your server" -ForegroundColor White
+    Write-Host "    2. Boot from USB (F12/F2/DEL for boot menu)" -ForegroundColor White
+    Write-Host "    3. Install Proxmox VE" -ForegroundColor White
+    Write-Host "    4. After reboot, log in and type: " -NoNewline -ForegroundColor White
+    Write-Host "tm" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  FILES CREATED:" -ForegroundColor Yellow
+    Write-Host "    $InstructionsDir\QUICK-START.txt" -ForegroundColor Gray
+    Write-Host "    $InstructionsDir\answer.toml" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  If auto-setup doesn't run, log in and run:" -ForegroundColor Yellow
+    Write-Host "    curl -fsSL $SetupScriptUrl | bash" -ForegroundColor Cyan
     Write-Host ""
 }
 
-# Main
+# --- Main ---
+
 function Main {
+    $script:OverallStartTime = Get-Date
+
     Write-Host ""
-    Write-Host "==========================================" -ForegroundColor Cyan
-    Write-Host "  PVE Installer - USB Creator" -ForegroundColor Cyan
-    Write-Host "==========================================" -ForegroundColor Cyan
+    Write-Host "  ==========================================" -ForegroundColor Cyan
+    Write-Host "    PVE Installer - USB Creator" -ForegroundColor Cyan
+    Write-Host "    Proxmox VE $PveVersion + Claude Code" -ForegroundColor DarkCyan
+    Write-Host "  ==========================================" -ForegroundColor Cyan
     Write-Host ""
 
     if (-not (Test-Administrator)) {
@@ -443,34 +634,25 @@ function Main {
         exit 1
     }
 
-    # Select USB drive
-    $selectedDrive = Select-USBDrive
-    Write-Status "Selected: $($selectedDrive.Model) ($($selectedDrive.Size) GB)"
+    Write-Success "Running as Administrator"
 
-    # Download Proxmox ISO
-    $isoPath = Download-ProxmoxISO
+    # Step 1: Select USB
+    $script:selectedDrive = Select-USBDrive
 
-    # Create answer file and instructions
+    # Step 2: Download ISO
+    $script:isoPath = Download-ProxmoxISO
+
+    # Step 3: Create setup files
     $hookScript = Create-AutoSetupScript
     $answerToml = Create-AnswerFile -HookScript $hookScript
     $instructionsDir = Create-InstructionFiles -AnswerToml $answerToml
 
-    # Write ISO to USB
-    Write-Host ""
-    Write-Host "Choose write method:" -ForegroundColor Yellow
-    Write-Host "  1. Use Rufus (Recommended - more reliable)"
-    Write-Host "  2. Direct write (Faster but may have issues)"
-    Write-Host ""
-    $method = Read-Host "Select (1 or 2)"
+    # Step 4: Write to USB
+    Write-IsoToUSB
 
-    if ($method -eq "2") {
-        Write-USBDirect -IsoPath $isoPath -UsbDrive $selectedDrive
-    }
-    else {
-        Write-USBWithRufus -IsoPath $isoPath -UsbDrive $selectedDrive
-    }
-
-    Show-Completion -IsoPath $isoPath -InstructionsDir $instructionsDir
+    # Step 5: Done
+    $script:CurrentStep++
+    Show-Completion -InstructionsDir $instructionsDir
 }
 
 Main
