@@ -102,7 +102,7 @@ function Get-USBDrives {
     $result = @()
 
     # Method 1: Get-Disk with USB BusType
-    $usbDisks = Get-Disk | Where-Object { $_.BusType -eq 'USB' }
+    $usbDisks = @(Get-Disk | Where-Object { $_.BusType -eq 'USB' })
 
     # Method 2: Fall back to WMI to catch drives that report different BusType
     if (-not $usbDisks -or $usbDisks.Count -eq 0) {
@@ -198,7 +198,7 @@ function Select-USBDrive {
 
     Write-Status "Scanning for USB drives..."
 
-    $drives = Get-USBDrives
+    $drives = @(Get-USBDrives)
 
     if ($drives.Count -eq 0) {
         Write-Err "No USB drives found. Please insert a USB drive."
