@@ -529,16 +529,34 @@ function Write-IsoToUSB {
 
     $diskNumber = $UsbDrive.DiskNumber
 
-    Write-Status "Clearing disk $diskNumber..."
-    # Set disk online and writable first
+    Write-Status "Preparing disk $diskNumber..."
+    # Set disk online and writable
     Set-Disk -Number $diskNumber -IsOffline $false -ErrorAction SilentlyContinue
     Set-Disk -Number $diskNumber -IsReadOnly $false -ErrorAction SilentlyContinue
-    Clear-Disk -Number $diskNumber -RemoveData -RemoveOEM -Confirm:$false -ErrorAction SilentlyContinue
+
+    # Dismount all volumes on the disk so Windows releases its lock
+    Get-Partition -DiskNumber $diskNumber -ErrorAction SilentlyContinue | ForEach-Object {
+        if ($_.DriveLetter) {
+            Write-Status "Dismounting volume $($_.DriveLetter):..."
+            $vol = Get-Volume -DriveLetter $_.DriveLetter -ErrorAction SilentlyContinue
+            if ($vol) {
+                # Use mountvol to dismount
+                & mountvol "$($_.DriveLetter):" /P 2>$null
+            }
+        }
+    }
+
+    # Clean via diskpart (more reliable than Clear-Disk for raw write)
+    Write-Status "Cleaning disk partition table..."
+    $diskpartScript = "select disk $diskNumber`nclean"
+    $diskpartScript | & diskpart | Out-Null
+    Start-Sleep -Seconds 2
     Write-Success "Disk cleared"
 
     Write-Status "Writing ISO to USB (DD mode)..."
-    $source = [System.IO.File]::OpenRead($IsoPath)
-    $dest = [System.IO.File]::OpenWrite("\\.\PhysicalDrive$diskNumber")
+    # Use FileStream with proper flags for raw device access
+    $source = [System.IO.FileStream]::new($IsoPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+    $dest = [System.IO.FileStream]::new("\\.\PhysicalDrive$diskNumber", [System.IO.FileMode]::Open, [System.IO.FileAccess]::Write, [System.IO.FileShare]::ReadWrite)
 
     $buffer = New-Object byte[] (4MB)
     $totalBytes = $source.Length
