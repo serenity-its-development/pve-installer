@@ -128,3 +128,17 @@ teardown() {
 @test "script displays web UI URL" {
     grep -q "8006" "$SCRIPT"
 }
+
+@test "script has cleanup_previous_pve function" {
+    grep -q "cleanup_previous_pve()" "$SCRIPT"
+}
+
+@test "script handles orphan ZFS pools" {
+    grep -q "zpool" "$SCRIPT"
+    grep -q "orphan" "$SCRIPT" || grep -q "export" "$SCRIPT"
+}
+
+@test "script cleans stale cluster config" {
+    grep -q "/etc/pve" "$SCRIPT"
+    grep -q "corosync" "$SCRIPT"
+}

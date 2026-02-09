@@ -67,6 +67,79 @@ get_ip() { ip route get 1 2>/dev/null | awk '{print $7; exit}'; }
 get_gateway() { ip route | grep default | awk '{print $3; exit}'; }
 get_interface() { ip route get 1 2>/dev/null | awk '{print $5; exit}'; }
 
+# Clean up previous PVE installation remnants
+cleanup_previous_pve() {
+    step "Checking for Previous PVE Installation"
+
+    local found_remnants=false
+
+    # Check for old ZFS pools (excluding the current boot pool)
+    local boot_pool=""
+    if command -v zpool &>/dev/null; then
+        boot_pool=$(df / 2>/dev/null | awk 'NR==2{print $1}' | cut -d/ -f1)
+        local pools=$(zpool list -H -o name 2>/dev/null || true)
+        if [[ -n "$pools" ]]; then
+            for pool in $pools; do
+                if [[ "$pool" != "$boot_pool" && "$pool" != "rpool" ]]; then
+                    warn "Found orphan ZFS pool: $pool"
+                    found_remnants=true
+                    if [[ "$AUTO_MODE" == "true" ]]; then
+                        log "Exporting orphan pool: $pool"
+                        zpool export "$pool" 2>/dev/null || true
+                    else
+                        echo -n "  Export pool '$pool'? (y/N): "
+                        read -r response
+                        if [[ "$response" == "y" || "$response" == "Y" ]]; then
+                            zpool export "$pool" 2>/dev/null || true
+                            log "Exported pool: $pool"
+                        fi
+                    fi
+                fi
+            done
+        fi
+    fi
+
+    # Check for stale cluster config
+    if [[ -d /etc/pve ]] && [[ -f /etc/pve/corosync.conf ]]; then
+        local node_count=$(grep -c "node {" /etc/pve/corosync.conf 2>/dev/null || echo 0)
+        if [[ $node_count -gt 1 ]]; then
+            warn "Found old cluster config with $node_count nodes"
+            found_remnants=true
+        fi
+    fi
+
+    # Clean stale subscription notice
+    if [[ -f /etc/apt/sources.list.d/pve-enterprise.list ]]; then
+        if grep -q "^deb" /etc/apt/sources.list.d/pve-enterprise.list 2>/dev/null; then
+            log "Disabling leftover enterprise repo..."
+            sed -i 's/^deb/#deb/' /etc/apt/sources.list.d/pve-enterprise.list
+            found_remnants=true
+        fi
+    fi
+
+    # Clean old ceph repo
+    if [[ -f /etc/apt/sources.list.d/ceph.list ]]; then
+        if grep -q "^deb" /etc/apt/sources.list.d/ceph.list 2>/dev/null; then
+            log "Disabling leftover Ceph enterprise repo..."
+            sed -i 's/^deb/#deb/' /etc/apt/sources.list.d/ceph.list
+            found_remnants=true
+        fi
+    fi
+
+    # Remove stale lock files
+    if [[ -f /var/lock/qemu-server/lock-* ]] 2>/dev/null; then
+        log "Removing stale QEMU lock files..."
+        rm -f /var/lock/qemu-server/lock-* 2>/dev/null || true
+        found_remnants=true
+    fi
+
+    if [[ "$found_remnants" == "true" ]]; then
+        log "Previous PVE remnants cleaned up"
+    else
+        log "No previous PVE remnants found"
+    fi
+}
+
 # Wait for network to be ready
 wait_for_network() {
     step "Waiting for Network"
@@ -373,6 +446,7 @@ main() {
     fi
 
     # Run setup steps
+    cleanup_previous_pve
     test_network || warn "Network tests had issues, continuing..."
     configure_repos
     install_dependencies

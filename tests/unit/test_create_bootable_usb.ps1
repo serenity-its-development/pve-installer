@@ -90,14 +90,14 @@ if (-not (Get-Module -ListAvailable -Name Pester)) {
         (Get-Content $TargetScript -Raw) -match 'function\s+Download-ProxmoxISO'
     }
 
-    # Test: Script has Copy-FilesToUSB function
-    Test-Condition "Script has Copy-FilesToUSB function" {
-        (Get-Content $TargetScript -Raw) -match 'function\s+Copy-FilesToUSB'
+    # Test: Script has Write-IsoToUSB function
+    Test-Condition "Script has Write-IsoToUSB function" {
+        (Get-Content $TargetScript -Raw) -match 'function\s+Write-IsoToUSB'
     }
 
-    # Test: Script has Create-BootScript function
-    Test-Condition "Script has Create-BootScript function" {
-        (Get-Content $TargetScript -Raw) -match 'function\s+Create-BootScript'
+    # Test: Script has Create-AnswerPartition function
+    Test-Condition "Script has Create-AnswerPartition function" {
+        (Get-Content $TargetScript -Raw) -match 'function\s+Create-AnswerPartition'
     }
 
     # Test: Script references Proxmox ISO URL
@@ -112,32 +112,31 @@ if (-not (Get-Module -ListAvailable -Name Pester)) {
         (Get-Content $TargetScript -Raw) -match 'WindowsPrincipal'
     }
 
-    # Test: Script formats USB drive
+    # Test: Script has disk operations
     Test-Condition "Script has disk formatting logic" {
         (Get-Content $TargetScript -Raw) -match 'Format-Volume' -or
         (Get-Content $TargetScript -Raw) -match 'Clear-Disk'
     }
 
-    # Test: Script copies installer scripts
-    Test-Condition "Script copies pve-installer scripts" {
-        (Get-Content $TargetScript -Raw) -match 'pve-installer' -and
-        (Get-Content $TargetScript -Raw) -match 'Copy-Item'
+    # Test: Script generates answer.toml
+    Test-Condition "Script generates answer.toml" {
+        (Get-Content $TargetScript -Raw) -match 'answer\.toml' -and
+        (Get-Content $TargetScript -Raw) -match 'post-commands'
     }
 
-    # Test: Script creates auto-install script
-    Test-Condition "Script creates auto-install.sh" {
-        (Get-Content $TargetScript -Raw) -match 'auto-install\.sh'
+    # Test: Script has Get-InstallConfig function
+    Test-Condition "Script has Get-InstallConfig function" {
+        (Get-Content $TargetScript -Raw) -match 'function\s+Get-InstallConfig'
     }
 
-    # Test: Script has completion message
+    # Test: Script has Show-Completion function
     Test-Condition "Script has Show-Completion function" {
         (Get-Content $TargetScript -Raw) -match 'function\s+Show-Completion'
     }
 
-    # Test: Script mentions next steps
+    # Test: Script shows next steps
     Test-Condition "Script shows next steps to user" {
-        (Get-Content $TargetScript -Raw) -match 'Boot.*USB' -or
-        (Get-Content $TargetScript -Raw) -match 'Next.*step'
+        (Get-Content $TargetScript -Raw) -match 'NEXT STEPS'
     }
 
     Write-Host "`n" + "=" * 50
@@ -168,6 +167,9 @@ Describe "Create-BootableUSB.ps1" {
             $content | Should -Match '\$DriveLetter'
             $content | Should -Match '\$PveVersion'
             $content | Should -Match '\$SkipDownload'
+            $content | Should -Match '\$Hostname'
+            $content | Should -Match '\$Filesystem'
+            $content | Should -Match '\$CleanPreviousPve'
         }
     }
 
@@ -193,12 +195,20 @@ Describe "Create-BootableUSB.ps1" {
             $script:Content | Should -Match 'function\s+Download-ProxmoxISO'
         }
 
-        It "Has Copy-FilesToUSB function" {
-            $script:Content | Should -Match 'function\s+Copy-FilesToUSB'
+        It "Has Write-IsoToUSB function" {
+            $script:Content | Should -Match 'function\s+Write-IsoToUSB'
         }
 
-        It "Has Create-BootScript function" {
-            $script:Content | Should -Match 'function\s+Create-BootScript'
+        It "Has Create-AnswerPartition function" {
+            $script:Content | Should -Match 'function\s+Create-AnswerPartition'
+        }
+
+        It "Has Create-AnswerToml function" {
+            $script:Content | Should -Match 'function\s+Create-AnswerToml'
+        }
+
+        It "Has Get-InstallConfig function" {
+            $script:Content | Should -Match 'function\s+Get-InstallConfig'
         }
 
         It "Has Show-Completion function" {
@@ -223,7 +233,7 @@ Describe "Create-BootableUSB.ps1" {
         }
 
         It "Warns about data loss" {
-            $script:Content | Should -Match 'ERASE|WARNING|destroy'
+            $script:Content | Should -Match 'ERASE|WARNING'
         }
     }
 
@@ -241,8 +251,15 @@ Describe "Create-BootableUSB.ps1" {
             $script:Content | Should -Match 'proxmox\.com'
         }
 
-        It "Creates pve-installer directory on USB" {
-            $script:Content | Should -Match 'pve-installer'
+        It "Generates answer.toml" {
+            $script:Content | Should -Match 'answer\.toml'
+            $script:Content | Should -Match 'post-commands'
+        }
+
+        It "Supports PVE cleanup for reinstall" {
+            $script:Content | Should -Match 'CleanPreviousPve'
+            $script:Content | Should -Match 'zpool'
+            $script:Content | Should -Match 'wipefs'
         }
     }
 
@@ -257,16 +274,19 @@ Describe "Create-BootableUSB.ps1" {
             $script:Content | Should -Match 'Get-Disk|Get-WmiObject'
         }
 
-        It "Formats the drive" {
-            $script:Content | Should -Match 'Format-Volume|Clear-Disk'
+        It "Clears the disk before writing" {
+            $script:Content | Should -Match 'Clear-Disk'
         }
 
-        It "Creates partition" {
-            $script:Content | Should -Match 'New-Partition|partition'
+        It "Writes ISO directly to disk" {
+            $script:Content | Should -Match 'PhysicalDrive'
+            $script:Content | Should -Match 'OpenWrite'
         }
 
-        It "Copies files to USB" {
-            $script:Content | Should -Match 'Copy-Item'
+        It "Creates answer partition" {
+            $script:Content | Should -Match 'New-Partition'
+            $script:Content | Should -Match 'proxmox-ais'
+            $script:Content | Should -Match 'Format-Volume'
         }
     }
 }

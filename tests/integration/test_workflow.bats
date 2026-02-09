@@ -75,7 +75,7 @@ teardown() {
     # Check for required functions
     grep -q "Get-USBDrives" "$PROJECT_ROOT/build/Create-BootableUSB.ps1"
     grep -q "Download-ProxmoxISO" "$PROJECT_ROOT/build/Create-BootableUSB.ps1"
-    grep -q "Create-InstructionFiles" "$PROJECT_ROOT/build/Create-BootableUSB.ps1"
+    grep -q "Create-AnswerPartition" "$PROJECT_ROOT/build/Create-BootableUSB.ps1"
 }
 
 @test "USB: Script creates correct directory structure" {
