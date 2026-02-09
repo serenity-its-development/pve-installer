@@ -24,7 +24,7 @@
 
 param(
     [string]$DriveLetter,
-    [string]$PveVersion = "8.3",
+    [string]$PveVersion = "8.4",
     [switch]$SkipDownload
 )
 
@@ -248,7 +248,8 @@ function Download-WithProgress {
             $transferred = $bitsJob.BytesTransferred
             $total = $bitsJob.BytesTotal
 
-            if ($total -gt 0) {
+            # BytesTotal returns UInt64.MaxValue (-1 as unsigned) when unknown
+            if ($total -gt 0 -and $total -lt 100GB) {
                 $percent = [math]::Round(($transferred / $total) * 100)
                 $mbTransferred = [math]::Round($transferred / 1MB)
                 $mbTotal = [math]::Round($total / 1MB)
@@ -278,40 +279,17 @@ function Download-WithProgress {
         Write-Warn "BITS transfer failed: $_"
         Write-Status "Falling back to WebClient with progress..."
 
-        # Fallback: WebClient with event-based progress
+        # Fallback: Invoke-WebRequest (simpler, more reliable)
         try {
-            $webClient = New-Object System.Net.WebClient
-
-            $downloadComplete = $false
-
-            Register-ObjectEvent -InputObject $webClient -EventName DownloadProgressChanged -Action {
-                $percent = $EventArgs.ProgressPercentage
-                $mbReceived = [math]::Round($EventArgs.BytesReceived / 1MB)
-                $mbTotal = [math]::Round($EventArgs.TotalBytesToReceive / 1MB)
-                Write-Host -NoNewline "`r  [$('#' * [math]::Floor(40 * $percent / 100))$('-' * (40 - [math]::Floor(40 * $percent / 100)))] ${percent}% ${mbReceived} MB / ${mbTotal} MB    "
-            } | Out-Null
-
-            Register-ObjectEvent -InputObject $webClient -EventName DownloadFileCompleted -Action {
-                $script:downloadComplete = $true
-            } | Out-Null
-
-            $webClient.DownloadFileAsync([Uri]$Url, $Destination)
-
-            while (-not $downloadComplete) {
-                Start-Sleep -Milliseconds 200
-            }
-
-            Write-Host ""
-            $webClient.Dispose()
+            Write-Status "Downloading with Invoke-WebRequest..."
+            $ProgressPreference = 'Continue'
+            Invoke-WebRequest -Uri $Url -OutFile $Destination -UseBasicParsing
             return $true
         }
         catch {
             Write-Host ""
-            Write-Warn "WebClient failed too, using Invoke-WebRequest (no granular progress)..."
-            $ProgressPreference = 'SilentlyContinue'
-            Invoke-WebRequest -Uri $Url -OutFile $Destination -UseBasicParsing
-            $ProgressPreference = 'Continue'
-            return $true
+            Write-Err "All download methods failed: $_"
+            throw
         }
     }
 }
