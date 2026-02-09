@@ -99,30 +99,97 @@ function Test-Administrator {
 # --- USB Detection ---
 
 function Get-USBDrives {
-    $disks = Get-Disk | Where-Object { $_.BusType -eq 'USB' }
     $result = @()
 
-    foreach ($disk in $disks) {
-        $partitions = Get-Partition -DiskNumber $disk.Number -ErrorAction SilentlyContinue
-        foreach ($part in $partitions) {
-            if ($part.DriveLetter) {
-                $result += [PSCustomObject]@{
-                    DriveLetter = $part.DriveLetter
-                    DiskNumber  = $disk.Number
-                    Size        = [math]::Round($disk.Size / 1GB, 1)
-                    Model       = $disk.FriendlyName
+    # Method 1: Get-Disk with USB BusType
+    $usbDisks = Get-Disk | Where-Object { $_.BusType -eq 'USB' }
+
+    # Method 2: Fall back to WMI to catch drives that report different BusType
+    if (-not $usbDisks -or $usbDisks.Count -eq 0) {
+        Write-Status "No USB BusType found, checking WMI..."
+        $wmiUsb = Get-WmiObject Win32_DiskDrive | Where-Object {
+            $_.InterfaceType -eq 'USB' -or
+            $_.PNPDeviceID -like '*USB*' -or
+            $_.MediaType -eq 'Removable Media'
+        }
+
+        if ($wmiUsb) {
+            foreach ($wmiDisk in $wmiUsb) {
+                $diskNum = $wmiDisk.DeviceID -replace '.*(\d+)$', '$1'
+                $usbDisks += Get-Disk -Number $diskNum -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    # Method 3: Check for removable drives via volume
+    if (-not $usbDisks -or $usbDisks.Count -eq 0) {
+        Write-Status "Checking for removable volumes..."
+        $removable = Get-Volume | Where-Object { $_.DriveType -eq 'Removable' }
+
+        if ($removable) {
+            foreach ($vol in $removable) {
+                if ($vol.DriveLetter) {
+                    $part = Get-Partition -DriveLetter $vol.DriveLetter -ErrorAction SilentlyContinue
+                    if ($part) {
+                        $disk = Get-Disk -Number $part.DiskNumber -ErrorAction SilentlyContinue
+                        if ($disk -and $disk -notin $usbDisks) {
+                            $usbDisks += $disk
+                        }
+                    }
                 }
             }
         }
-        if (-not $partitions -or -not ($partitions | Where-Object { $_.DriveLetter })) {
+    }
+
+    if (-not $usbDisks -or $usbDisks.Count -eq 0) {
+        # Show what we DO see so the user can troubleshoot
+        Write-Warn "No USB drives detected. Here's what Windows sees:"
+        Write-Host ""
+        Get-Disk | ForEach-Object {
+            Write-Host "    Disk $($_.Number): $($_.FriendlyName) | Bus: $($_.BusType) | Size: $([math]::Round($_.Size/1GB,1)) GB" -ForegroundColor Gray
+        }
+        Write-Host ""
+        $removableVols = Get-Volume | Where-Object { $_.DriveType -eq 'Removable' }
+        if ($removableVols) {
+            Write-Host "    Removable volumes:" -ForegroundColor Gray
+            $removableVols | ForEach-Object {
+                Write-Host "      $($_.DriveLetter): $($_.FileSystemLabel) ($($_.DriveType))" -ForegroundColor Gray
+            }
+        }
+        Write-Host ""
+        return $result
+    }
+
+    foreach ($disk in $usbDisks) {
+        $partitions = Get-Partition -DiskNumber $disk.Number -ErrorAction SilentlyContinue
+        $added = $false
+
+        if ($partitions) {
+            foreach ($part in $partitions) {
+                if ($part.DriveLetter) {
+                    $result += [PSCustomObject]@{
+                        DriveLetter = $part.DriveLetter
+                        DiskNumber  = $disk.Number
+                        Size        = [math]::Round($disk.Size / 1GB, 1)
+                        Model       = $disk.FriendlyName
+                        BusType     = $disk.BusType
+                    }
+                    $added = $true
+                }
+            }
+        }
+
+        if (-not $added) {
             $result += [PSCustomObject]@{
                 DriveLetter = $null
                 DiskNumber  = $disk.Number
                 Size        = [math]::Round($disk.Size / 1GB, 1)
                 Model       = $disk.FriendlyName
+                BusType     = $disk.BusType
             }
         }
     }
+
     return $result
 }
 
