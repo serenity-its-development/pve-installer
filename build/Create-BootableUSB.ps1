@@ -529,8 +529,7 @@ function Write-IsoToUSB {
 
     $diskNumber = $UsbDrive.DiskNumber
 
-    # Use diskpart for ALL disk prep - it handles offline/locked/bad-state disks
-    # unlike Set-Disk which hangs on corrupted offline disks
+    # Use diskpart with timeout - it can hang on badly-stuck disks
     Write-Status "Preparing disk $diskNumber via diskpart..."
     $dpCommands = @"
 select disk $diskNumber
@@ -541,8 +540,23 @@ offline disk noerr
 "@
     $dpTempFile = [System.IO.Path]::GetTempFileName()
     $dpCommands | Out-File -FilePath $dpTempFile -Encoding ASCII
-    $dpResult = & "$env:SystemRoot\System32\diskpart.exe" /s $dpTempFile 2>&1
-    Remove-Item $dpTempFile -Force -ErrorAction SilentlyContinue
+
+    $dpProc = Start-Process -FilePath "$env:SystemRoot\System32\diskpart.exe" -ArgumentList "/s", $dpTempFile -NoNewWindow -PassThru -RedirectStandardOutput "$dpTempFile.out" -RedirectStandardError "$dpTempFile.err"
+    $dpCompleted = $dpProc.WaitForExit(30000)  # 30 second timeout
+
+    if (-not $dpCompleted) {
+        $dpProc.Kill()
+        Remove-Item $dpTempFile, "$dpTempFile.out", "$dpTempFile.err" -Force -ErrorAction SilentlyContinue
+        Write-Err "diskpart timed out after 30 seconds"
+        Write-Warn "The USB drive may be stuck. Please:"
+        Write-Warn "  1. Physically UNPLUG the USB drive"
+        Write-Warn "  2. Wait 5 seconds"
+        Write-Warn "  3. Plug it back in"
+        Write-Warn "  4. Run this script again"
+        exit 1
+    }
+
+    Remove-Item $dpTempFile, "$dpTempFile.out", "$dpTempFile.err" -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 3
     Write-Success "Disk cleaned and taken offline"
 
@@ -597,8 +611,12 @@ offline disk noerr
     $dpOnline = "select disk $diskNumber`nonline disk noerr"
     $dpTempFile = [System.IO.Path]::GetTempFileName()
     $dpOnline | Out-File -FilePath $dpTempFile -Encoding ASCII
-    & "$env:SystemRoot\System32\diskpart.exe" /s $dpTempFile 2>&1 | Out-Null
-    Remove-Item $dpTempFile -Force -ErrorAction SilentlyContinue
+    $dpProc = Start-Process -FilePath "$env:SystemRoot\System32\diskpart.exe" -ArgumentList "/s", $dpTempFile -NoNewWindow -PassThru -RedirectStandardOutput "$dpTempFile.out" -RedirectStandardError "$dpTempFile.err"
+    if (-not $dpProc.WaitForExit(15000)) {
+        $dpProc.Kill()
+        Write-Warn "diskpart online timed out - answer partition may not be created"
+    }
+    Remove-Item $dpTempFile, "$dpTempFile.out", "$dpTempFile.err" -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 2
 
     Write-StepComplete "ISO written ($totalMB MB @ $avgSpeed MB/s)"
