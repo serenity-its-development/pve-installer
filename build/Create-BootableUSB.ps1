@@ -549,7 +549,7 @@ function Write-IsoToUSB {
     # Clean via diskpart (more reliable than Clear-Disk for raw write)
     Write-Status "Cleaning disk partition table..."
     $diskpartScript = "select disk $diskNumber`nclean"
-    $diskpartScript | & diskpart | Out-Null
+    $diskpartScript | & "$env:SystemRoot\System32\diskpart.exe" | Out-Null
     Start-Sleep -Seconds 2
     Write-Success "Disk cleared"
 
